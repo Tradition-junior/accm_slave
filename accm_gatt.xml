@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<gatt>
+
+    <!-- Generic Access Service -->
+    <!-- https://developer.bluetooth.org/gatt/services/Pages/ServiceViewer.aspx?u=org.bluetooth.service.generic_access.xml -->    
+    <service uuid="1800">
+
+        <description>Generic Access Service</description>
+        
+        <!-- Device name -->
+        <!-- https://developer.bluetooth.org/gatt/characteristics/Pages/CharacteristicViewer.aspx?u=org.bluetooth.characteristic.gap.device_name.xml -->
+        <characteristic uuid="2a00">
+            <properties read="true" const="true" />
+            <value>BGM111 ACCM</value>
+        </characteristic>
+
+        <!-- Appearances -->
+        <!-- https://developer.bluetooth.org/gatt/characteristics/Pages/CharacteristicViewer.aspx?u=org.bluetooth.characteristic.gap.appearance.xml -->
+        <characteristic uuid="2a01">
+            <properties read="true" const="true" />
+            <value type="hex">0000</value>
+        </characteristic>
+
+    </service>
+
+    <!-- Device Information Service -->
+    <!-- https://developer.bluetooth.org/gatt/services/Pages/ServiceViewer.aspx?u=org.bluetooth.service.device_information.xml -->
+    <service uuid="180A">
+
+        <description>Device Information Service</description>
+    
+        <!-- Manufacturer name string -->
+        <!-- https://developer.bluetooth.org/gatt/characteristics/Pages/CharacteristicViewer.aspx?u=org.bluetooth.characteristic.manufacturer_name_string.xml -->
+        <characteristic uuid="2A29">
+            <properties read="true" const="true" />
+            <value>Silicon Labs</value>
+        </characteristic>
+
+        <!-- Model number string string -->
+        <!-- https://developer.bluetooth.org/gatt/characteristics/Pages/CharacteristicViewer.aspx?u=org.bluetooth.characteristic.model_number_string.xml -->
+        <characteristic uuid="2A24">
+            <properties read="true" const="true" />
+            <value>BGM111</value>
+        </characteristic>
+
+        <!-- Serial number string -->
+        <!-- https://developer.bluetooth.org/gatt/characteristics/Pages/CharacteristicViewer.aspx?u=org.bluetooth.characteristic.system_id.xml -->
+        <characteristic uuid="2A23">
+            <properties read="true" const="true" />
+            <value type="hex">000102030405</value>
+        </characteristic>
+    </service>
+    
+    <!-- Our custom accelerometer service is declared here -->   
+    <!-- UUID values generated with https://www.guidgenerator.com/ --> 
+
+    <service uuid="ebe57fb2-4c48-4f56-bd9e-46d45beb9274" advertise="true">
+        <description>ACCM Service</description>
+        
+        <characteristic uuid="54a3afa5-86c5-46ab-8393-5cc1332130b8" id="secret_string">
+            <description>Secret string</description>
+            <properties read="true" authenticated_read="true" />
+            <value length="16" type="hex"></value>
+        </characteristic>
+        
+        <characteristic uuid="ed3d929d-aaa7-4bf7-b222-bcff617d272d" id="accm_data">
+            <description>ACCM data</description>
+            <properties read="true" notify="true" />
+            
+            <value length="3" type="hex"></value>
+        </characteristic>
+        
+        
+    </service>
+    
+</gatt>

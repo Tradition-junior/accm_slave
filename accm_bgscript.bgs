@@ -1,0 +1,365 @@
+
+# Constants:
+const endpoint_uart1   = 2
+
+# LED0 is mapped to pin F6
+const led_bank      = 5
+const led_pin_mask  = $40
+
+
+# some ASCII codes (used in the debug command interface)
+const ASCII_0   = 48
+const ASCII_9   = 57
+
+const ASCII_a   = 97
+const ASCII_b   = 98
+const ASCII_c   = 99
+const ASCII_d   = 100
+const ASCII_e   = 101
+
+const ASCII_r   = 114
+
+const ASCII_x   = 120
+
+const ASCII_ESC = 27
+
+# Variables:
+dim ticker
+
+dim spi_self_test
+dim spi_self_test_result
+ 
+dim string(6)
+
+dim connected
+dim conn_handle
+
+dim accm_samples(3)
+
+dim n
+
+# Import SPI bitbang implementation
+import "spi_bitbang.bgs" 
+
+# print a nibble
+procedure print_nibble(nibble)
+
+    n = nibble
+	if n < $a then
+        n = n + $30
+    else
+        n = n + $37
+    end if
+    
+
+    call endpoint_send(endpoint_uart1, 1, n)
+end
+
+# print hex values (range 0..255 -> output 0x00..0xFF)
+procedure print_hex(hex)
+    #call print_nibble(hex\16)
+    call print_nibble(hex&$f)
+end
+
+
+procedure print_passkey(data)
+
+    string(0:1) = (data / 100000) + (data / -1000000 * 10) + 48
+    string(1:1) = (data / 10000) + (data / -100000 * 10) + 48
+    string(2:1) = (data / 1000) + (data / -10000 * 10) + 48
+    string(3:1) = (data / 100) + (data / -1000 * 10) + 48
+    string(4:1) = (data / 10) + (data / -100 * 10) + 48
+    string(5:1) = data + (data / 10 * -10) + 48
+    
+    call endpoint_send(endpoint_uart1, 9, "PASSKEY: ")
+    call endpoint_send(endpoint_uart1, 6, string(0:6))
+    call endpoint_send(endpoint_uart1, 2, "\r\n")
+end 
+
+event sm_passkey_display(connection,passkey)
+
+    call print_passkey(passkey)
+
+end 
+
+event sm_bonded(connection,bonding)
+    call endpoint_send(endpoint_uart1, 8, "bonded\n\r")
+end
+
+event sm_bonding_failed(connection,reason)
+    call endpoint_send(endpoint_uart1, 16, "bonding failed\n\r")
+end 
+
+# Boot event listener - Generated when the module is powered up or reset
+event system_boot(major, minor, patch, build, bootloader, hw)
+
+    call endpoint_send(endpoint_uart1, 6, "Boot\r\n")   
+
+    spi_self_test = 10
+    
+    # init some "secret" data in GATT
+    call gatt_server_write_attribute_value(secret_string,0,1, 65)
+    call gatt_server_write_attribute_value(secret_string,1,1, 66)
+    call gatt_server_write_attribute_value(secret_string,2,1, 67)
+    call gatt_server_write_attribute_value(secret_string,3,1, 68)
+    
+	call hardware_spi_transfer($0F, 4, 1100)
+
+    # Set advertisement interval to 100ms, use all three ADV channels
+    call le_gap_set_adv_parameters(160,160,7)
+
+    # Start Bluetooth LE advertisements and enable connections
+    call le_gap_set_mode(2,2)
+    
+    # enable bondable
+    call sm_set_bondable_mode(1)
+    
+    # configure authentication methods and I/O capabilities of the system
+    call sm_configure(1, sm_io_capability_displayonly)
+        
+    # setup timer 
+    call hardware_set_soft_timer(4096,0,0)
+        
+end
+
+
+
+event gatt_procedure_completed(connection,result)
+    call endpoint_send(endpoint_uart1, 26, "gatt_procedure_completed\r\n")
+end 
+
+event le_connection_opened(address, address_type, master, connection, bonding)
+
+    call endpoint_send(endpoint_uart1, 11, "Connected\r\n")
+    connected = 1
+    # make copy of connection handle for later use
+    conn_handle = connection
+
+end
+
+# BLE connection disconnected event - Generated when a BLE connection is closed or lost
+event le_connection_closed(reason, connection)
+
+    call endpoint_send(endpoint_uart1, 14, "Disconnected\r\n")
+    connected = 0
+    conn_handle = -1
+
+    # Start Bluetooth LE advertisements and enable connections
+    call le_gap_set_mode(2,2)
+    
+end
+
+# This event is triggered whenever the connection parameters are changed and at any time a connection is established.
+event le_connection_parameters(connection,interval,latency,timeout,security_mode)
+
+    call endpoint_send(endpoint_uart1, 35, "connection update, security mode = ")
+    call print_nibble(security_mode)
+    call endpoint_send(endpoint_uart1, 2, "\r\n")
+    
+end 
+
+# capture writes from remote device. 
+event gatt_server_attribute_value(connection,characteristic,att_opcode,offset,value_le,value)
+
+end
+
+
+procedure self_test()
+
+    call endpoint_send(endpoint_uart1, 1, ".")
+
+    if spi_self_test = 9 then
+        # write to TRIM_GP1 register:
+        call spi_write($3c, $ab)
+    end if
+    
+    if spi_self_test = 7 then
+        # write to TRIM_GP0 register:
+        call spi_write($3b, $cd)    
+    end if
+    
+    if spi_self_test = 5 then
+        # read from TRIM_GP1 register:
+        call spi_read($3c)
+        if spi_data_in != $ab then 
+            call endpoint_send(endpoint_uart1, 20, "SPI read mismatch:\r\n")
+            call print_hex(spi_data_in & $ff)
+            spi_self_test_result = -1
+        end if 
+        
+    end if
+    
+    if spi_self_test = 3 then
+        # read from TRIM_GP0 register:
+        call spi_read($3b)
+        if spi_data_in != $cd then
+            call endpoint_send(endpoint_uart1, 20, "SPI read mismatch:\r\n")
+            call print_hex(spi_data_in & $ff)
+            spi_self_test_result = -1 
+        end if
+    end if
+
+    if spi_self_test = 1 then
+        # end of spi self test part -> check if the tests were passed
+        
+        if spi_self_test_result < 0 then
+            call endpoint_send(endpoint_uart1, 23, "SPI self test failed!\r\n")
+            call endpoint_send(endpoint_uart1, 28, "Is add-on board connected?\r\n")
+        else
+            spi_self_test_result = 1
+            call endpoint_send(endpoint_uart1, 18, "SPI self test OK\r\n")
+        end if 
+    end if 
+    
+end 
+
+# This event indicates incoming data from an endpoint. Used here to implement simple debug
+# command interface with the UART
+event endpoint_data(endpoint,data_len, data_data)
+
+    if endpoint != endpoint_uart1 then
+        return
+    end if
+    
+    if data_data(0:1) = ASCII_r then 
+        call endpoint_send(endpoint_uart1, 10, "RESET---\r\n")
+        call system_reset(0)
+        return
+    end if
+    
+    if data_data(0:1) = ASCII_ESC then 
+        call endpoint_send(endpoint_uart1, 10, "--ESC---\r\n")
+        # just a placeholder. you can enter any debug functionality here (e.g. disconnect if connection is active)
+        return
+    end if
+    
+    if data_data(0:1) = ASCII_b then 
+        call endpoint_send(endpoint_uart1, 13, "--Bondings>\r\n")
+        call sm_list_all_bondings()
+        return
+    end if
+    
+    if data_data(0:1) = ASCII_x then 
+        call endpoint_send(endpoint_uart1, 51, "delete all bondings\r\n")
+        call sm_delete_bondings()
+        return
+    end if
+        
+    
+    if data_data(0:1) = ASCII_e && connected > 0 then 
+        call endpoint_send(endpoint_uart1, 23, "Request encryption...\r\n")
+        call sm_increase_security(conn_handle)
+        return
+    end if
+    
+    call endpoint_send(endpoint_uart1, 15, "Endpoint data\r\n")
+    call print_hex(data_len)
+    call endpoint_send(endpoint_uart1, 2, "\r\n")
+end 
+
+event sm_list_bonding_entry(bonding,address,address_type)
+    
+    call print_hex(address(0:1))
+    call print_hex(address(1:1))
+    call print_hex(address(2:1))
+    call print_hex(address(3:1))
+    call print_hex(address(4:1))
+    call print_hex(address(5:1))
+    call endpoint_send(endpoint_uart1, 2, "\r\n")
+end
+
+event sm_list_all_bondings_complete()
+    call endpoint_send(endpoint_uart1, 13, "--Bondings<\r\n")
+end
+
+dim string_x(3)
+dim string_y(3)
+dim string_z(3)
+# Software timer event - generated when software timer runs out
+event hardware_soft_timer(handle)
+
+    # spi_self_test is a counter that counts down to zero. It is used to do a simple
+    # spi test sequence at startup
+    if spi_self_test > 0 then
+        call self_test()
+        spi_self_test = spi_self_test - 1
+        return      
+    end if
+    
+    # ticker runs from 0..9 
+    if ticker < 9 then
+        ticker = ticker + 1
+    else
+        ticker = 0
+    end if
+    
+    # -- LED blinking: select pattern depending on connection status ---
+    if connected = 0 then 
+        # no connection -> drive LED using a "heart-beat" pattern: ON when ticker = 0 or 2, otherwise OFF
+        if ticker = 0 || ticker = 2  then
+            call hardware_write_gpio(led_bank, led_pin_mask, $00) #led on
+        else
+            call hardware_write_gpio(led_bank, led_pin_mask, led_pin_mask) #led off
+        end if
+    
+    else
+        # connected -> blink fast
+        if (ticker & 1) then                
+            call hardware_write_gpio(led_bank, led_pin_mask, $00) #led on
+        else
+            call hardware_write_gpio(led_bank, led_pin_mask, led_pin_mask) #led off
+        end if
+        
+    end if 
+    
+    
+    # read X, Y, Z samples from accelerometer IC (only if the self-test was passed)
+    if spi_self_test_result > 0 then 
+    
+        call spi_read($03) # read X axis value MSB part
+        accm_samples(0:1) = spi_data_in 
+         
+        call spi_read($05) # read Y axis value MSB part
+        accm_samples(1:1) = spi_data_in 
+    
+        call spi_read($07) # read Z axis value MSB part
+        accm_samples(2:1) = spi_data_in 
+		
+		string_x(0:1) = (accm_samples(0:1) / 100) + 48 
+		string_x(1:1) = (accm_samples(0:1) / 10) + (accm_samples(0:1) / -100 * 10) + 48 
+		string_x(3:1) = accm_samples(0:1) + (accm_samples(0:1) / 10 * -10) + 48
+	    
+		string_y(0:1) = (accm_samples(1:1) / 100) + 48 
+		string_y(1:1) = (accm_samples(1:1) / 10) + (accm_samples(1:1) / -100 * 10) + 48 
+		string_y(2:1) = accm_samples(1:1) + (accm_samples(1:1) / 10 * -10) + 48
+        
+		string_z(0:1) = (accm_samples(2:1) / 100) + 48 
+		string_z(1:1) = (accm_samples(2:1) / 10) + (accm_samples(2:1) / -100 * 10) + 48 
+		string_z(2:1) = accm_samples(2:1) + (accm_samples(2:1) / 10 * -10) + 48
+		
+	    call endpoint_send(endpoint_uart1, 1, string_x(0:4))
+		call endpoint_send(endpoint_uart1, 1, " ")
+		call endpoint_send(endpoint_uart1, 1, string_y(0:3))
+        call endpoint_send(endpoint_uart1, 1, " ")
+		call endpoint_send(endpoint_uart1, 1, string_z(0:3))
+        call endpoint_send(endpoint_uart1, 2, "\r\n")
+    else
+        # self-test failed -> use fixed data
+        accm_samples(0:1) = $ee 
+        accm_samples(1:1) = $ee 
+        accm_samples(2:1) = $ee 
+        
+    end if
+    
+    
+    # if connection is open, send notification to client including latest x/y/z accelerometer samples
+    if connected > 0 then
+    
+        # call gatt_server_send_characteristic_notification(connection,characteristic,value_len, value_data)(result)
+        call gatt_server_send_characteristic_notification($ff, accm_data, 3, accm_samples(0:3))
+    
+    end if
+        
+end
+
+# End of BGScript
